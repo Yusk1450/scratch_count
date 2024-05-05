@@ -53,6 +53,22 @@ block_names = [
 	]
 ]
 
+# Internal Drop-Down Reporters
+dropdown_blocks = [
+	'motion_goto_menu',
+	'motion_glideto_menu',
+	'motion_pointtowards_menu',
+	'looks_costume',
+	'looks_backdrops',
+	'sound_sounds_menu',
+	'event_broadcast_menu',
+	'control_create_clone_of_menu',
+	'sensing_touchingobjectmenu',
+	'sensing_distancetomenu',
+	'sensing_keyoptions',
+	'sensing_of_object_menu'
+]
+
 def openSb3(filename):
 	zf = zipfile.ZipFile(filename, 'r')
 	return zf.open('project.json')
@@ -100,7 +116,7 @@ def parsingSb3(data):
 			opcode = block['opcode']
 
 			# ブロックに付随するドロップダウンメニューブロックを除外する
-			if opcode.endswith("menu"):
+			if opcode in dropdown_blocks:
 				continue
 
 			all_blocks_num += 1
