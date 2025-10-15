@@ -2,164 +2,176 @@ import zipfile
 import json
 import os
 import csv
+import statistics
 
 dir = 'sb'
 outputfile = 'data.csv'
 
 block_category_prefixes = [
-	# 動き
-	'motion',
-	# 見た目
-	'looks',
-	# 音
-	'sound',
-	# イベント
-	'event',
-	# 制御
-	'control',
-	# 調べる
-	'sensing',
-	# 演算
-	'operator',
-	# 変数
-	'data',
-	# ブロック定義
-	'procedures'
+    'motion',   # 動き
+    'looks',    # 見た目
+    'sound',    # 音
+    'event',    # イベント
+    'control',  # 制御
+    'sensing',  # 調べる
+    'operator', # 演算
+    'data',     # 変数
+    'procedures' # ブロック定義
 ]
 
-# 途中...
-block_names = [
-	# 動き
-	[
-		# 〜歩動かす
-		'motion_movesteps',
-		# 〜度回す（右）
-		'motion_turnright',
-		# 〜度回す（左）
-		'motion_turnleft',
-		# 〜へ行く
-		'motion_goto',
-		# 〜へ行く？
-		'motion_goto_menu',
-		# x座標を〜、y座標を〜にする
-		'motion_gotoxy',
-		'motion_glideto',
-		'motion_glideto_menu',
-		'motion_glidesecstoxy',
-		# 〜度に向ける
-		'motion_pointindirection',
-		# 〜へ向ける
-		'motion_pointtowards'
-	]
-]
-
-# Internal Drop-Down Reporters
 dropdown_blocks = [
-	'motion_goto_menu',
-	'motion_glideto_menu',
-	'motion_pointtowards_menu',
-	'looks_costume',
-	'looks_backdrops',
-	'sound_sounds_menu',
-	'event_broadcast_menu',
-	'control_create_clone_of_menu',
-	'sensing_touchingobjectmenu',
-	'sensing_distancetomenu',
-	'sensing_keyoptions',
-	'sensing_of_object_menu'
+    'motion_goto_menu',
+    'motion_glideto_menu',
+    'motion_pointtowards_menu',
+    'looks_costume',
+    'looks_backdrops',
+    'sound_sounds_menu',
+    'event_broadcast_menu',
+    'control_create_clone_of_menu',
+    'sensing_touchingobjectmenu',
+    'sensing_distancetomenu',
+    'sensing_keyoptions',
+    'sensing_of_object_menu'
 ]
 
 def openSb3(filename):
-	zf = zipfile.ZipFile(filename, 'r')
-	return zf.open('project.json')
+    zf = zipfile.ZipFile(filename, 'r')
+    return zf.open('project.json')
+
+def collect_script_blocks(blocks, start_id):
+    visited = set()
+    stack = [start_id]
+
+    while stack:
+        block_id = stack.pop()
+        if block_id in visited or block_id not in blocks:
+            continue
+        visited.add(block_id)
+        block = blocks[block_id]
+
+        for _, val in block.get("inputs", {}).items():
+            if isinstance(val, list) and len(val) > 1 and isinstance(val[1], str):
+                if val[1] in blocks:
+                    stack.append(val[1])
+
+        next_id = block.get("next")
+        if isinstance(next_id, str) and next_id in blocks:
+            stack.append(next_id)
+
+    return visited
+
+def block_depth(blocks, block_id, current_depth=1):
+    block = blocks[block_id]
+    depth = current_depth
+
+    for input_name, val in block.get("inputs", {}).items():
+        if input_name in ("SUBSTACK", "SUBSTACK2"):
+            if isinstance(val, list) and len(val) > 1:
+                child = val[1]
+                if isinstance(child, str) and child in blocks:
+                    depth = max(depth, block_depth(blocks, child, current_depth + 1))
+
+    next_id = block.get("next")
+    if isinstance(next_id, str) and next_id in blocks:
+        depth = max(depth, block_depth(blocks, next_id, current_depth))
+
+    return depth
+
+def is_event_block(block):
+    opcode = block.get("opcode", "")
+    if opcode.startswith("event_"):
+        if opcode in ("event_broadcast", "event_broadcastandwait"):
+            return False
+        return True
+    return False
 
 def parsingSb3(data):
-	# 総ブロック数
-	all_blocks_num = 0
-	# 変数の数
-	variables_num = 0
-	# スプライトの数
-	sprites_num = 0
-	# 各カテゴリのブロック数
-	categories_block_num = []
-	for i in range(len(block_category_prefixes)):
-		categories_block_num.append(0)
+    all_blocks_num = 0
+    variables_num = 0
+    sprites_num = 0
+    categories_block_num = [0] * len(block_category_prefixes)
+    script_depths = []
+    target_depths = {}
 
-	# print(data)
+    for e in data['targets']:
+        if not e['isStage']:
+            sprites_num += 1
 
-	# スプライト
-	for _, e in enumerate(data['targets']):
-		
-		# print(e['name'])
+        for _, (hash_key, variable) in e['variables'].items():
+            variables_num += 1
 
-		if not e['isStage']:
-			sprites_num += 1
+        for _, (hash_key, list) in enumerate(e['lists'].items()):
+            variables_num += 1
 
-		# 変数
-		for _, (hash_key, variable) in enumerate(e['variables'].items()):
-			variables_num += 1
+        blocks = e['blocks']
+        local_depths = []
 
-		# リスト
-		for _, (hash_key, list) in enumerate(e['lists'].items()):
-			variables_num += 1
+        for block_id, block in blocks.items():
+            if not ("opcode" in block):
+                continue
+            if block.get("topLevel") and is_event_block(block):
 
-		# ブロック
-		for _, (hash_key, block) in enumerate(e['blocks'].items()):
+                # このスクリプトに含まれる全ブロックを収集
+                script_blocks = collect_script_blocks(blocks, block_id)
 
-			# print(block)
+                # イベントブロックしかない (=1つだけ) の場合はスキップ
+                if len(script_blocks) <= 1:
+                    continue
 
-			# 値のブロックが放置されている場合の対策
-			if not ("opcode" in block):
-				continue
+                # ネスト深さを計算
+                depth = block_depth(blocks, block_id)
+                script_depths.append(depth)
+                local_depths.append(depth)
 
-			# ブロック名
-			opcode = block['opcode']
+                # ブロック数カウント
+                for b_id in script_blocks:
+                    b = blocks[b_id]
+                    op = b.get("opcode", "")
+                    if op in dropdown_blocks:
+                        continue
+                    all_blocks_num += 1
+                    if len(op.split('_')) > 1:
+                        prefix = op.split('_')[0]
+                        for i, cat in enumerate(block_category_prefixes):
+                            if cat == prefix:
+                                categories_block_num[i] += 1
 
-			# ブロックに付随するドロップダウンメニューブロックを除外する
-			if opcode in dropdown_blocks:
-				continue
+        if local_depths:
+            target_depths[e['name']] = max(local_depths)
 
-			all_blocks_num += 1
-			# print(opcode)
+    if script_depths:
+        max_depth = max(script_depths)
+        avg_depth = statistics.mean(script_depths)
+        median_depth = statistics.median(script_depths)
+        max_targets = [name for name, d in target_depths.items() if d == max_depth]
+    else:
+        max_depth = avg_depth = median_depth = 0
+        max_targets = []
 
-			# プレフィックスのみを抜き出す
-			if len(opcode.split('_')) > 1:
-				opcode_prefix = opcode.split('_')[0]
+    return [all_blocks_num, variables_num, sprites_num, categories_block_num,
+            max_depth, avg_depth, median_depth, max_targets]
 
-			for i, prefix in enumerate(block_category_prefixes):
-				if prefix == opcode_prefix:
-					categories_block_num[i] += 1
-
-	return [
-		all_blocks_num,
-		variables_num,
-		sprites_num,
-		categories_block_num
-	]
+# CSV 出力準備
+result = [['ファイル名', '総ブロック数', '変数の数', 'スプライト数',
+           '動き', '見た目', '音', 'イベント', '制御', '調べる', '演算', '変数', 'ブロック定義']]
 
 files = os.listdir(dir)
-
-result = [['ファイル名', '総ブロック数', '変数の数', 'スプライト数', '動き', '見た目', '音', 'イベント', '制御', '調べる', '演算', '変数', 'ブロック定義']]
-
 for file in files:
-	if not (file.startswith(".")):
-		print(file)
-		f = openSb3(dir+'/'+file)
-		data = json.load(f)
+    if not (file.startswith(".")) and file.endswith(".sb3"):
+        print("解析中:", file)
+        f = openSb3(os.path.join(dir, file))
+        data = json.load(f)
+        r = parsingSb3(data)
+        print(r)
 
-		r = parsingSb3(data)
-		print(r)
+        row = [file, r[0], r[1], r[2]]
+        row.extend(r[3])
 
-		row = []
-		row.append(file)
-		row.append(r[0])
-		row.append(r[1])
-		row.append(r[2])
-		for i in range(len(r[3])):
-			row.append(r[3][i])
+        nest_stats = f"\n最大ネスト: {r[4]} (ターゲット: {', '.join(r[7])})\n平均ネスト: {r[5]:.2f}\n中央値: {r[6]}"
+        row.append(nest_stats)
 
-		result.append(row)
+        result.append(row)
 
-with open(outputfile, mode="w") as csv_file:
-	writer = csv.writer(csv_file)
-	writer.writerows(result)
+with open(outputfile, mode="w", newline="") as csv_file:
+    writer = csv.writer(csv_file)
+    writer.writerows(result)
