@@ -153,7 +153,8 @@ def parsingSb3(data):
 
 # CSV 出力準備
 result = [['ファイル名', '総ブロック数', '変数の数', 'スプライト数',
-           '動き', '見た目', '音', 'イベント', '制御', '調べる', '演算', '変数', 'ブロック定義']]
+           '動き', '見た目', '音', 'イベント', '制御', '調べる', '演算', '変数', 'ブロック定義',
+           '最大ネスト', '平均ネスト', '中央値']]
 
 files = os.listdir(dir)
 for file in files:
@@ -166,9 +167,8 @@ for file in files:
 
         row = [file, r[0], r[1], r[2]]
         row.extend(r[3])
-
-        nest_stats = f"\n最大ネスト: {r[4]} (ターゲット: {', '.join(r[7])})\n平均ネスト: {r[5]:.2f}\n中央値: {r[6]}"
-        row.append(nest_stats)
+        # ネスト統計情報を個別の列として追加
+        row.extend([r[4], f"{r[5]:.2f}", r[6]])
 
         result.append(row)
 
